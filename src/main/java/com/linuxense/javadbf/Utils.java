@@ -14,6 +14,7 @@ package com.linuxense.javadbf;
 import java.io.*;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.text.*;
 
@@ -91,21 +92,21 @@ public final class Utils {
 		return num2;
 	}
 
-	public static byte[] textPadding(String text, String characterSetName, int length) throws java.io.UnsupportedEncodingException {
+	public static byte[] textPadding(String text, Charset characterSet, int length) {
 
-		return textPadding(text, characterSetName, length, Utils.ALIGN_LEFT);
+		return textPadding(text, characterSet, length, Utils.ALIGN_LEFT);
 	}
 
-	public static byte[] textPadding(String text, String characterSetName, int length, int alignment) throws java.io.UnsupportedEncodingException {
+	public static byte[] textPadding(String text, Charset characterSet, int length, int alignment) {
 
-		return textPadding(text, characterSetName, length, alignment, (byte) ' ');
+		return textPadding(text, characterSet, length, alignment, (byte) ' ');
 	}
 
-	public static byte[] textPadding(String text, String characterSetName, int length, int alignment, byte paddingByte) throws java.io.UnsupportedEncodingException {
+	public static byte[] textPadding(String text, Charset characterSet, int length, int alignment, byte paddingByte) {
 
 		if (text.length() >= length) {
 
-			return text.substring(0, length).getBytes(characterSetName);
+			return text.substring(0, length).getBytes(characterSet);
 		}
 
 		byte byte_array[] = new byte[length];
@@ -114,24 +115,24 @@ public final class Utils {
 		switch (alignment) {
 
 			case ALIGN_LEFT:
-				System.arraycopy(text.getBytes(characterSetName), 0, byte_array, 0, text.length());
+				System.arraycopy(text.getBytes(characterSet), 0, byte_array, 0, text.length());
 				break;
 
 			case ALIGN_RIGHT:
 				int t_offset = length - text.length();
-				System.arraycopy(text.getBytes(characterSetName), 0, byte_array, t_offset, text.length());
+				System.arraycopy(text.getBytes(characterSet), 0, byte_array, t_offset, text.length());
 				break;
 		}
 
 		return byte_array;
 	}
 
-	public static byte[] decimalFormating(BigDecimal bigDecimal, String characterSetName, int fieldLength, int sizeDecimalPart) throws java.io.UnsupportedEncodingException {
+	public static byte[] decimalFormating(BigDecimal bigDecimal, Charset characterSet, int fieldLength, int sizeDecimalPart) {
 
-		return textPadding(bigDecimal.setScale(sizeDecimalPart, RoundingMode.HALF_UP).toPlainString(), characterSetName, fieldLength, ALIGN_RIGHT);
+		return textPadding(bigDecimal.setScale(sizeDecimalPart, RoundingMode.HALF_UP).toPlainString(), characterSet, fieldLength, ALIGN_RIGHT);
 	}
 
-	public static byte[] doubleFormating(Double doubleNum, String characterSetName, int fieldLength, int sizeDecimalPart) throws java.io.UnsupportedEncodingException {
+	public static byte[] doubleFormating(Double doubleNum, Charset characterSet, int fieldLength, int sizeDecimalPart) throws java.io.UnsupportedEncodingException {
 
 		int sizeWholePart = fieldLength - (sizeDecimalPart > 0 ? (sizeDecimalPart + 1) : 0);
 
@@ -154,7 +155,7 @@ public final class Utils {
 
 		DecimalFormat df = new DecimalFormat(format.toString());
 
-		return textPadding(df.format(doubleNum.doubleValue()).toString(), characterSetName, fieldLength, ALIGN_RIGHT);
+		return textPadding(df.format(doubleNum.doubleValue()).toString(), characterSet, fieldLength, ALIGN_RIGHT);
 	}
 
 	public static boolean contains(byte[] arr, byte value) {

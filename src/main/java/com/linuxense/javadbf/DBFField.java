@@ -11,9 +11,11 @@
 */
 
 package com.linuxense.javadbf;
-import java.io.DataInput;
-import java.io.DataOutput;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.ReadableByteChannel;
+import java.nio.channels.WritableByteChannel;
 
 /**
 	DBFField represents a field specification in an dbf file.
@@ -54,7 +56,7 @@ public class DBFField {
 
 
 	/* Field struct variables start here */
-	byte[] fieldName = new byte[ 11]; /* 0-10*/
+	byte[] fieldName = new byte[11]; /* 0-10*/
 	char dataType;                    /* 11 */
 	int reserv1;                      /* 12-15 */
 	int fieldLength;                 /* 16 */
@@ -76,44 +78,49 @@ public class DBFField {
 	The data in the DataInputStream object is supposed to be organised correctly
 	and the stream "pointer" is supposed to be positioned properly.
 
-	@param in DataInputStream
+	@param channel DataInputStream
 	@return Returns the created DBFField object.
 	@throws IOException If any stream reading problems occures.
 	*/
-	protected static DBFField createField( DataInput in) 
+	protected static DBFField createField( ReadableByteChannel channel) 
 	throws IOException {
 
-		DBFField field = new DBFField();
-
-		byte t_byte = in.readByte(); /* 0 */
-		if( t_byte == (byte)0x0d) {
-
-			//System.out.println( "End of header found");
+		ByteBuffer buff = ByteBuffer.allocate(32);	
+		buff.limit(1);
+		
+		channel.read(buff);
+		
+		buff.flip();
+		
+		if( buff.get() == (byte)0x0d) { /* 0 */
 			return null;
 		}
-
-		in.readFully( field.fieldName, 1, 10);	/* 1-10 */
-		field.fieldName[0] = t_byte;
+		
+		buff.limit(32);
+		channel.read(buff);
+		buff.flip();
+		buff.order(ByteOrder.LITTLE_ENDIAN);
+				
+		DBFField field = new DBFField();
+		buff.get(field.fieldName);	/* 0-10 */
 
 		for( int i=0; i<field.fieldName.length; i++) {
-
 			if( field.fieldName[ i] == (byte)0) {
-
 				field.nameNullIndex = i;
 				break;
 			}
 		}
 
-		field.dataType = (char)in.readByte(); /* 11 */
-		field.reserv1 = Utils.readLittleEndianInt( in); /* 12-15 */
-		field.fieldLength = in.readUnsignedByte();  /* 16 */
-		field.decimalCount = in.readByte(); /* 17 */
-		field.reserv2 = Utils.readLittleEndianShort( in); /* 18-19 */
-		field.workAreaId = in.readByte(); /* 20 */
-		field.reserv2 = Utils.readLittleEndianShort( in); /* 21-22 */
-		field.setFieldsFlag = in.readByte(); /* 23 */
-		in.readFully( field.reserv4); /* 24-30 */
-		field.indexFieldFlag = in.readByte(); /* 31 */
+		field.dataType = (char)buff.get(); /* 11 */
+		field.reserv1 = buff.getInt(); /* 12-15 */
+		field.fieldLength = buff.get() & 0xff;  /* 16 */
+		field.decimalCount = buff.get(); /* 17 */
+		field.reserv2 = buff.getShort(); /* 18-19 */
+		field.workAreaId = buff.get(); /* 20 */
+		field.reserv2 = buff.getShort(); /* 21-22 */
+		field.setFieldsFlag = buff.get(); /* 23 */
+		buff.get( field.reserv4); /* 24-30 */
+		field.indexFieldFlag = buff.get(); /* 31 */
 
 		return field;
 	}
@@ -125,26 +132,28 @@ public class DBFField {
 		@param os OutputStream
 		@throws IOException if any stream related issues occur.
 	*/
-	protected void write( DataOutput out)
+	protected void write( WritableByteChannel byteChannel)
 	throws IOException {
-
-		//DataOutputStream out = new DataOutputStream( os);
+		ByteBuffer buff = ByteBuffer.allocate(32);	
 
 		// Field Name
-		out.write( fieldName);        /* 0-10 */
-		out.write( new byte[ 11 - fieldName.length]);
+		buff.put(fieldName);        /* 0-10 */
 
 		// data type
-		out.writeByte( dataType); /* 11 */
-		out.writeInt( 0x00);   /* 12-15 */
-		out.writeByte( fieldLength); /* 16 */
-		out.writeByte( decimalCount); /* 17 */
-		out.writeShort( (short)0x00); /* 18-19 */
-		out.writeByte( (byte)0x00); /* 20 */
-		out.writeShort( (short)0x00); /* 21-22 */
-		out.writeByte( (byte)0x00); /* 23 */
-		out.write( new byte[7]); /* 24-30*/
-		out.writeByte( (byte)0x00); /* 31 */
+		buff.put((byte)dataType); /* 11 */
+		buff.putInt( 0x00);   /* 12-15 */
+		buff.put( (byte)fieldLength); /* 16 */
+		buff.put( decimalCount); /* 17 */
+		buff.putShort( (short)0x00); /* 18-19 */
+		buff.put( (byte)0x00); /* 20 */
+		buff.putShort( (short)0x00); /* 21-22 */
+		buff.put( (byte)0x00); /* 23 */
+		buff.put( new byte[7]); /* 24-30*/
+		buff.put( (byte)0x00); /* 31 */
+		
+		buff.flip();
+		
+		byteChannel.write(buff);
 	}
 
 	/**
@@ -225,13 +234,16 @@ public class DBFField {
 			throw new IllegalArgumentException( "Field name cannot be null");
 		}
 
-		if( value.length() == 0 || value.length() > 10) {
+		byte[] bytes = value.getBytes();
+		
+		if( bytes.length == 0 || bytes.length > 10) {
 
 			throw new IllegalArgumentException( "Field name should be of length 0-10");
 		}
 
-		this.fieldName = value.getBytes();
-		this.nameNullIndex = this.fieldName.length;
+		fieldName = new byte[11];		
+		System.arraycopy(bytes, 0, fieldName, 0, bytes.length);
+		this.nameNullIndex = bytes.length;
 	}
 
 	/**

@@ -11,9 +11,19 @@
 	$Id: DBFWriter.java,v 1.11 2004-07-19 08:57:31 anil Exp $
 */
 package com.linuxense.javadbf;
-import java.io.*;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.math.BigDecimal;
-import java.util.*;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.Channels;
+import java.nio.channels.FileChannel;
+import java.nio.channels.WritableByteChannel;
+import java.util.List;
+import java.util.Vector;
 
 import org.joda.time.LocalDate;
 
@@ -29,18 +39,16 @@ import org.joda.time.LocalDate;
 public class DBFWriter extends DBFBase {
 
 	/* other class variables */
-	DBFHeader header;
-	Vector v_records = new Vector();
+	Vector<Object[]> v_records = new Vector<Object[]>();
 	int recordCount = 0;
-	RandomAccessFile raf = null; /* Open and append records to an existing DBF */
+	FileChannel dataChannel = null; /* Open and append records to an existing DBF */
 	boolean appendMode = false;
 
 	/**
 		Creates an empty Object.
 	*/
 	public DBFWriter() {
-
-		this.header = new DBFHeader();
+		header = new DBFHeader();
 	}
 
 	/**
@@ -52,23 +60,22 @@ public class DBFWriter extends DBFBase {
 	throws DBFException {
 
 		try {
-
-			this.raf = new RandomAccessFile( dbfFile, "rw");
+			dataChannel = new RandomAccessFile( dbfFile, "rw").getChannel();
 
 			/* before proceeding check whether the passed in File object 
 			 is an empty/non-existent file or not.
 			 */
 			if( !dbfFile.exists() || dbfFile.length() == 0) {
 
-				this.header = new DBFHeader();
+				header = new DBFHeader();
 				return;
 			}
 
 			header = new DBFHeader();
-			this.header.read( raf);
+			header.read( dataChannel);
 
 			/* position file pointer at the end of the raf */
-			this.raf.seek( this.raf.length()-1 /* to ignore the END_OF_DATA byte at EoF */);
+			dataChannel.position(dataChannel.size()-1 /* to ignore the END_OF_DATA byte at EoF */);
 		}
 		catch( FileNotFoundException e) {
 
@@ -79,43 +86,43 @@ public class DBFWriter extends DBFBase {
 			throw new DBFException( e.getMessage() + " while reading header", e);
 		}
 
-		this.recordCount = this.header.numberOfRecords;
+		this.recordCount = header.getNumberOfRecords();
 	}
 
 	/**
 		Sets fields.
 	*/
-	public void setFields( DBFField[] fields)
+	public void setFields( List<DBFField> fields)
 	throws DBFException {
 
-		if( this.header.fieldArray != null) {
+		if( header.getFieldList() != null) {
 
 			throw new DBFException( "Fields has already been set");
 		}
 
-		if( fields == null || fields.length == 0) {
+		if( fields == null || fields.size() == 0) {
 
 			throw new DBFException( "Should have at least one field");
 		}
 
-		for( int i=0; i<fields.length; i++) {
+		for( int i=0; i<fields.size(); i++) {
 
-			if( fields[i] == null) {
+			if( fields.get(i) == null) {
 
 				throw new DBFException( "Field " + (i+1) + " is null");
 			}
 		}
 
-		this.header.fieldArray = fields;
+		header.setFieldList(fields);
 
 		try {
 
-			if( this.raf != null && this.raf.length() == 0) {
+			if( dataChannel != null && dataChannel.size() == 0) {
 
 				/* 
 			  	this is a new/non-existent file. So write header before proceeding
 		 		*/
-				this.header.write( this.raf);
+				header.write( dataChannel);
 			}
 		}
 		catch( IOException e) {
@@ -130,7 +137,7 @@ public class DBFWriter extends DBFBase {
 	public void addRecord( Object[] values)
 	throws DBFException {
 
-		if( this.header.fieldArray == null) {
+		if( header.getFieldList() == null) {
 
 			throw new DBFException( "Fields should be set before adding records");
 		}
@@ -140,19 +147,22 @@ public class DBFWriter extends DBFBase {
 			throw new DBFException( "Null cannot be added as row");
 		}
 
-		if( values.length != this.header.fieldArray.length) {
+		if( values.length != header.getFieldList().size()) {
 
 			throw new DBFException( "Invalid record. Invalid number of fields in row");
 		}
 
-		for( int i=0; i<this.header.fieldArray.length; i++) {
+		for( int i=0; i<header.getFieldList().size(); i++) {
 
+			
 			if( values[i] == null) {
 
 				continue;
 			}
 
-			switch( this.header.fieldArray[i].getDataType()) {
+			DBFField field = header.getFieldList().get(i);
+			
+			switch( field.getDataType()) {
 
 				case CHARACTER:
 					if( !(values[i] instanceof String)) {
@@ -193,7 +203,7 @@ public class DBFWriter extends DBFBase {
 			}
 		}
 
-		if( this.raf == null) {
+		if( dataChannel == null) {
 
 			v_records.addElement( values);
 		}
@@ -201,7 +211,7 @@ public class DBFWriter extends DBFBase {
 
 			try {
 			
-				writeRecord( this.raf, values);
+				writeRecord( dataChannel, values);
 				this.recordCount++;
 			}
 			catch( IOException e) {
@@ -219,12 +229,11 @@ public class DBFWriter extends DBFBase {
 
 		try {
 
-			if( this.raf == null) {
-
-				DataOutputStream outStream = new DataOutputStream( out);
-
-				this.header.numberOfRecords = v_records.size();
-				this.header.write( outStream);
+			if( dataChannel == null) {
+				WritableByteChannel dataChannel = Channels.newChannel(out);
+							
+				header.setNumberOfRecords(v_records.size());
+				header.write( dataChannel);
 
 				/* Now write all the records */
 				int t_recCount = v_records.size();
@@ -232,23 +241,29 @@ public class DBFWriter extends DBFBase {
 
 					Object[] t_values = (Object[])v_records.elementAt( i);
 
-					writeRecord( outStream, t_values);
+					writeRecord( dataChannel, t_values);
 				}
 
-				outStream.write( END_OF_DATA);
-				outStream.flush();
+				ByteBuffer buff = ByteBuffer.allocate(1);
+				buff.put(END_OF_DATA).flip();
+				dataChannel.write(buff);
+				// flush
+//				dataChannel.;
 			}
 			else {
 
 				/* everything is written already. just update the header for record count and the END_OF_DATA mark */
-				this.header.numberOfRecords = this.recordCount;
-				this.raf.seek( 0);
-				this.header.write( this.raf);
-				this.raf.seek( raf.length());
-				this.raf.writeByte( END_OF_DATA);
-				this.raf.close();
+				header.setNumberOfRecords(this.recordCount);
+				dataChannel.position(0);
+				header.write( dataChannel);
+				dataChannel.position(dataChannel.size());
+				
+				ByteBuffer buff = ByteBuffer.allocate(1);
+				buff.put(END_OF_DATA).flip();
+				dataChannel.write(buff);
+				
+				dataChannel.close();
 			}
-
 		}
 		catch( IOException e) {
 
@@ -262,23 +277,28 @@ public class DBFWriter extends DBFBase {
 		this.write( null);
 	}
 
-	private void writeRecord( DataOutput dataOutput, Object []objectArray) 
+	private void writeRecord( WritableByteChannel dataOutput, Object []objectArray) 
 	throws IOException {
 
-		dataOutput.write( (byte)' ');
-		for( int j=0; j<this.header.fieldArray.length; j++) { /* iterate throught fields */
+		ByteBuffer buff = ByteBuffer.allocate(header.getRecordLength());
+		buff.order(ByteOrder.LITTLE_ENDIAN);
+		
+		buff.put( (byte)' ');
+		for( int j=0; j<header.getFieldList().size(); j++) { /* iterate throught fields */
 
-			switch( this.header.fieldArray[j].getDataType()) {
+			DBFField field = header.getFieldList().get(j);
+			
+			switch( field.getDataType()) {
 
 				case CHARACTER:
 					if( objectArray[j] != null) {
 
 						String str_value = objectArray[j].toString();	
-						dataOutput.write( Utils.textPadding( str_value, characterSetName, this.header.fieldArray[j].getFieldLength()));
+						buff.put( Utils.textPadding( str_value, characterSet, field.getFieldLength()));
 					}
 					else {
 
-						dataOutput.write( Utils.textPadding( "", this.characterSetName, this.header.fieldArray[j].getFieldLength()));
+						buff.put( Utils.textPadding( "", characterSet, field.getFieldLength()));
 					}
 
 					break;
@@ -286,10 +306,10 @@ public class DBFWriter extends DBFBase {
 				case DATE:
 					if( objectArray[j] != null) {
 												
-						dataOutput.write(((LocalDate)objectArray[j]).toString("YYYYMMdd").getBytes());
+						buff.put(((LocalDate)objectArray[j]).toString("YYYYMMdd").getBytes());
 					}
 					else {
-						dataOutput.write( "        ".getBytes());
+						buff.put( "        ".getBytes());
 					}
 
 					break;
@@ -298,11 +318,11 @@ public class DBFWriter extends DBFBase {
 
 					if( objectArray[j] != null) {
 
-						dataOutput.write( Utils.doubleFormating( (Double)objectArray[j], this.characterSetName, this.header.fieldArray[j].getFieldLength(), this.header.fieldArray[j].getDecimalCount()));
+						buff.put( Utils.doubleFormating( (Double)objectArray[j], characterSet, field.getFieldLength(), field.getDecimalCount()));
 					}
 					else {
 
-						dataOutput.write( Utils.textPadding( " ", this.characterSetName, this.header.fieldArray[j].getFieldLength(), Utils.ALIGN_RIGHT));
+						buff.put( Utils.textPadding( " ", characterSet, field.getFieldLength(), Utils.ALIGN_RIGHT));
 					}
 
 					break;
@@ -311,13 +331,13 @@ public class DBFWriter extends DBFBase {
 
 					if( objectArray[j] != null) {
 
-						dataOutput.write(
-							Utils.decimalFormating( (BigDecimal)objectArray[j], this.characterSetName, this.header.fieldArray[j].getFieldLength(), this.header.fieldArray[j].getDecimalCount()));
+						buff.put(
+							Utils.decimalFormating( (BigDecimal)objectArray[j], characterSet, field.getFieldLength(), field.getDecimalCount()));
 					}
 					else {
 
-						dataOutput.write( 
-							Utils.textPadding( " ", this.characterSetName, this.header.fieldArray[j].getFieldLength(), Utils.ALIGN_RIGHT));
+						buff.put( 
+							Utils.textPadding( " ", characterSet, field.getFieldLength(), Utils.ALIGN_RIGHT));
 					}
 
 					break;
@@ -325,10 +345,10 @@ public class DBFWriter extends DBFBase {
 				case INTEGER:
 
 					if( objectArray[j] != null) {
-						dataOutput.write(Utils.littleEndian(((Integer)objectArray[j]).intValue()));
+						buff.putInt(((Integer)objectArray[j]).intValue());
 					}
 					else {
-						dataOutput.write( new byte[4]);
+						buff.putInt(0);
 					}
 
 					break;
@@ -338,16 +358,16 @@ public class DBFWriter extends DBFBase {
 
 						if( (Boolean)objectArray[j] == Boolean.TRUE) {
 
-							dataOutput.write( (byte)'T');
+							buff.put( (byte)'T');
 						}
 						else {
 
-							dataOutput.write((byte)'F');
+							buff.put((byte)'F');
 						}
 					}
 					else {
 
-						dataOutput.write( (byte)'?');
+						buff.put( (byte)'?');
 					}
 
 					break;
@@ -357,8 +377,14 @@ public class DBFWriter extends DBFBase {
 					break;
 
 				default:	
-					throw new DBFException( "Unknown field type " + this.header.fieldArray[j].getDataType());
+					throw new DBFException( "Unknown field type " + field.getDataType());
 			}
 		}	/* iterating through the fields */
 	}
+
+	public void close() throws IOException {
+		if (dataChannel != null) {
+			dataChannel.close();
+		}
+    }
 }

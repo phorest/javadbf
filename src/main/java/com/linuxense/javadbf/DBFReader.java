@@ -13,11 +13,15 @@
 
 package com.linuxense.javadbf;
 
-import java.io.DataInputStream;
 import java.io.EOFException;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FilenameFilter;
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 
 import org.joda.time.LocalDate;
 
@@ -63,10 +67,10 @@ import org.joda.time.LocalDate;
 	
 */
 public class DBFReader extends DBFBase {
-
-	DataInputStream dataInputStream;
-	DBFHeader header;
-
+	
+	FileChannel dataChannel;	
+	MemoFile memoFile;
+	
 	/* Class specific variables */
 	boolean isClosed = true;
 
@@ -80,40 +84,49 @@ public class DBFReader extends DBFBase {
 
 		@param InputStream where the data is read from.	
 	*/
-	public DBFReader( InputStream in) throws DBFException {
-
+	public DBFReader( File file) throws DBFException {		
 		try {
-
-			this.dataInputStream = new DataInputStream( in);
-			this.isClosed = false;
-			this.header = new DBFHeader();
-			this.header.read( this.dataInputStream);
+			dataChannel = new FileInputStream(file).getChannel();
+			isClosed = false;
+			header = new DBFHeader();
+			header.read( dataChannel);
+			characterSet = header.getLanguageDriver().getCharset();
+			
+			if (header.getSignature() == DBFHeader.SIG_VISUAL_FOX_PRO) {
+				if ((header.getMdxFlag() & 0x2) > 0) {
+					final String fptFileName = file.getName().replaceAll("\\.[^.]+$", "")+".fpt";
+					
+					String[] list = file.getParentFile().list(new FilenameFilter() {
+						
+						public boolean accept(File dir, String name) {
+							return fptFileName.equalsIgnoreCase(name);
+						}
+					});
+					
+					if (list.length > 0 ) {
+						memoFile = new FPTMemoFile(new File(file.getParentFile(), list[0]), "r", characterSet);
+					}
+				}
+			}
 
 			/* it might be required to leap to the start of records at times */
-			int t_dataStartIndex = this.header.headerLength - ( 32 + (32*this.header.fieldArray.length)) - 1;
-			if( t_dataStartIndex > 0) {
-
-				dataInputStream.skip( t_dataStartIndex);
+			if( header.getHeaderLength() > 0 ) {
+				dataChannel.position(header.getHeaderLength());
 			}
 		}
 		catch( IOException e) {
-
 			throw new DBFException( e.getMessage(), e);	
 		}
 	}
 
 
 	public String toString() {
+		StringBuffer sb = new StringBuffer().append(header.getYear()).append("/").append(header.getMonth()).append("/").append(header.getDay()).append("\n").append("Total records: ")
+		        .append(header.getNumberOfRecords()).append("\nHEader length: ").append(header.getHeaderLength());
 
-		StringBuffer sb = new StringBuffer(  this.header.year + "/" + this.header.month + "/" + this.header.day + "\n"
-		+ "Total records: " + this.header.numberOfRecords + 
-		"\nHEader length: " + this.header.headerLength +
-		"");
-
-		for( int i=0; i<this.header.fieldArray.length; i++) {
-
-			sb.append( this.header.fieldArray[i].getName());
-			sb.append( "\n");
+		for (DBFField field : header.getFieldList()) {
+			sb.append(field.getName());
+			sb.append("\n");
 		}
 
 		return sb.toString();
@@ -124,7 +137,7 @@ public class DBFReader extends DBFBase {
 	*/
 	public int getRecordCount() {
 
-		return this.header.numberOfRecords;
+		return header.getNumberOfRecords();
 	}
 
 	/**
@@ -136,13 +149,11 @@ public class DBFReader extends DBFBase {
 	public DBFField getField( int index) 
 	throws DBFException {
 
-		if( isClosed) {
+		checkIfClosed();
 
-			throw new DBFException( "Source is not open");
-		}
-
-		return this.header.fieldArray[ index];
+		return header.getFieldList().get(index);
 	}
+
 
 	/**
 		Returns the number of field in the DBF.
@@ -150,14 +161,11 @@ public class DBFReader extends DBFBase {
 	public int getFieldCount() 
 	throws DBFException {
 
-		if( isClosed) {
+		checkIfClosed();
 
-			throw new DBFException( "Source is not open");
-		}
+		if( header.getFieldList() != null) {
 
-		if( this.header.fieldArray != null) {
-
-			return this.header.fieldArray.length;
+			return header.getFieldList().size();
 		}
 
 		return -1;
@@ -171,57 +179,60 @@ public class DBFReader extends DBFBase {
 	public Object[] nextRecord() 
 	throws DBFException {
 
-		if( isClosed) {
+		checkIfClosed();
 
-			throw new DBFException( "Source is not open");
-		}
-
-		Object recordObjects[] = new Object[ this.header.fieldArray.length];
+		ByteBuffer buff = ByteBuffer.allocate(header.getRecordLength());
+		buff.order(ByteOrder.LITTLE_ENDIAN);
+				
+ 		Object recordObjects[] = new Object[ header.getFieldList().size()];
 
 		try {
-
 			boolean isDeleted = false;
 			do {
+				buff.clear();
 				
-				if( isDeleted) {
-	
-					dataInputStream.skip( this.header.recordLength-1);
-				}
-	
-				int t_byte = dataInputStream.readByte();
-				if( t_byte == END_OF_DATA) {
+				dataChannel.read(buff);
+				buff.flip();
 
+				if (buff.limit() < 1) {
+					return null;
+				}
+				int t_byte = buff.get();
+
+				if( t_byte == END_OF_DATA) {
 					return null;
 				}
 
-				isDeleted = (  t_byte == '*');
+				isDeleted = (t_byte == '*');				
 			} while( isDeleted);
 	
-			for( int i=0; i<this.header.fieldArray.length; i++) {
+			for( int i = 0; i < header.getFieldList().size(); i++) {
 	
-				switch( this.header.fieldArray[i].getDataType()) {
+				DBFField field = header.getFieldList().get(i);
+				
+				switch( field.getDataType()) {
 	
 					case CHARACTER:
 	
-						byte b_array[] = new byte[ this.header.fieldArray[i].getFieldLength()];
-						dataInputStream.read( b_array);
-						recordObjects[i] = new String( b_array, characterSetName);
+						byte b_array[] = new byte[ field.getFieldLength()];
+						buff.get( b_array);
+						recordObjects[i] = new String( b_array, characterSet);
 						break;
 	
 					case DATE:
 	
 						StringBuilder sb = new StringBuilder();
 						
-						sb.append((char)dataInputStream.readByte());
-						sb.append((char)dataInputStream.readByte());
-						sb.append((char)dataInputStream.readByte());
-						sb.append((char)dataInputStream.readByte());
+						sb.append((char)buff.get());
+						sb.append((char)buff.get());
+						sb.append((char)buff.get());
+						sb.append((char)buff.get());
 						sb.append("-");
-						sb.append((char)dataInputStream.readByte());
-						sb.append((char)dataInputStream.readByte());
+						sb.append((char)buff.get());
+						sb.append((char)buff.get());
 						sb.append("-");
-						sb.append((char)dataInputStream.readByte());
-						sb.append((char)dataInputStream.readByte());
+						sb.append((char)buff.get());
+						sb.append((char)buff.get());
 	
 						try {
 							recordObjects[i] = new LocalDate(sb.toString());
@@ -237,20 +248,17 @@ public class DBFReader extends DBFBase {
 	
 						try {
 
-							byte t_float[] = new byte[ this.header.fieldArray[i].getFieldLength()];
-							dataInputStream.read( t_float);
+							byte t_float[] = new byte[ field.getFieldLength()];
+							buff.get( t_float);
 							t_float = Utils.trimLeftSpaces( t_float);
 							if( t_float.length > 0 && !Utils.contains( t_float, (byte)'?')) {
-
 								recordObjects[i] = new Double( new String( t_float));
 							}
 							else {
-
 								recordObjects[i] = null;
 							}
 						}
 						catch( NumberFormatException e) {
-
 							throw new DBFException( "Failed to parse Float: " + e.getMessage(), e);
 						}
 
@@ -260,8 +268,8 @@ public class DBFReader extends DBFBase {
 	
 						try {
 
-							byte t_numeric[] = new byte[ this.header.fieldArray[i].getFieldLength()];
-							dataInputStream.read( t_numeric);
+							byte t_numeric[] = new byte[ field.getFieldLength()];
+							buff.get( t_numeric);
 							t_numeric = Utils.trimLeftSpaces( t_numeric);
 
 							if( t_numeric.length > 0 && !Utils.contains( t_numeric, (byte)'?')) {
@@ -280,23 +288,14 @@ public class DBFReader extends DBFBase {
 
 						break;
 	
-					case INTEGER:
+					case INTEGER:						
 						
-						try {
-							int value = Utils.readLittleEndianInt(dataInputStream);
-
-							recordObjects[i] = Integer.valueOf(value);
-						}
-						catch( Exception e) {
-
-							throw new DBFException( "Failed to parse Number: " + e.getMessage(), e);
-						}
-
+						recordObjects[i] = Integer.valueOf(buff.getInt());
 						break;
 	
 					case LOGICAL:
 	
-						byte t_logical = dataInputStream.readByte();
+						byte t_logical = buff.get();
 						if( t_logical == 'Y' || t_logical == 't' || t_logical == 'T' || t_logical == 't') {
 	
 							recordObjects[i] = Boolean.TRUE;
@@ -307,16 +306,25 @@ public class DBFReader extends DBFBase {
 						}
 						break;
 	
-					case MEMO:
-						byte t_numeric[] = new byte[ 4 ];						
-						dataInputStream.read( t_numeric);
+					case MEMO:						
+						if (header.getSignature() == DBFHeader.SIG_VISUAL_FOX_PRO && memoFile != null) {
+							int address = buff.getInt();
+							
+							recordObjects[i] = address > 0 ? memoFile.getMemo(address) : null;
+						} else {
+							byte t_numeric[] = new byte[ field.getFieldLength() ];						
+							buff.get( t_numeric);
 						
-						System.out.println(new String(t_numeric));
+							//						
+							recordObjects[i] = null;
+						}
 						
-						recordObjects[i] = null;
 						break;
 
 					default:
+						byte bytes[] = new byte[ field.getFieldLength() ];
+						buff.get( bytes );
+						
 						recordObjects[i] = null;
 				}
 			}
@@ -331,4 +339,19 @@ public class DBFReader extends DBFBase {
 
 		return recordObjects;
 	}
+
+
+	public void close() throws IOException {
+		isClosed = true;
+		
+		if (dataChannel!= null) {
+			dataChannel.close();
+		}
+    }
+	
+	private void checkIfClosed() throws DBFException {
+	    if (isClosed) {
+			throw new DBFException( "Source is not open");
+		}
+    }	
 }

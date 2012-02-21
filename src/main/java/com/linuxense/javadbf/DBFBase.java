@@ -12,11 +12,16 @@
 */
 package com.linuxense.javadbf;
 
-public abstract class DBFBase {
+import java.io.Closeable;
+import java.nio.charset.Charset;
 
-	protected String characterSetName = "8859_1";
-	protected final int END_OF_DATA = 0x1A;
+public abstract class DBFBase implements Closeable {		
+	protected final static byte END_OF_DATA = (byte)0x1A;
+	
+	protected Charset characterSet = LanguageDriver.DEFAULT_CHARSET;
 
+	protected DBFHeader header;
+	
 	/* 
 	 If the library is used in a non-latin environment use this method to set 
 	 corresponding character set. More information: 
@@ -24,13 +29,10 @@ public abstract class DBFBase {
 	 Also see the documentation of the class java.nio.charset.Charset
 	*/
 	public String getCharactersetName() {
-
-		return this.characterSetName;
+		return characterSet.name();
 	}
 
 	public void setCharactersetName( String characterSetName) {
-
-		this.characterSetName = characterSetName;
+		this.characterSet = Charset.forName(characterSetName);
 	}
-
 }
