@@ -127,7 +127,7 @@ class DBFHeader {
 
 		buff.put(mdxFlag); /* 28 */
 		buff.put(languageDriver == null ? 0 : languageDriver.getCode()); /* 29 */
-		buff.putShort(Utils.littleEndian(reserv4)); /* 30-31 */
+		buff.putShort(reserv4); /* 30-31 */
 
 		buff.flip();
 		
