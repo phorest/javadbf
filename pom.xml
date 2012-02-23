@@ -3,7 +3,7 @@
     <groupId>com.linuxense</groupId>
     <artifactId>javadbf</artifactId>
     <packaging>jar</packaging>
-    <version>0.4.0-PHOREST</version>
+    <version>0.4.0-PHOREST-SNAPSHOT</version>
     <name>javadbf</name>
 
     <build>
