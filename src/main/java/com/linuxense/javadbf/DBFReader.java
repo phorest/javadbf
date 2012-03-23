@@ -272,7 +272,7 @@ public class DBFReader extends DBFBase {
 							buff.get( t_numeric);
 							t_numeric = Utils.trimLeftSpaces( t_numeric);
 
-							if( t_numeric.length > 0 && !Utils.contains( t_numeric, (byte)'?')) {
+							if( t_numeric.length > 0 && !(Utils.contains( t_numeric, (byte)'?') || Utils.contains( t_numeric, (byte)'*'))) {
 
 								recordObjects[i] = new BigDecimal( new String( t_numeric));
 							}
