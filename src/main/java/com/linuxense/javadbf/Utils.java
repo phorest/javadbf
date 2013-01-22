@@ -32,7 +32,19 @@ public final class Utils {
 		for (int i = 0; i < arr.length; i++) {
 
 			if (arr[i] != ' ') {
+				t_sb.append((char) arr[i]);
+			}
+		}
 
+		return t_sb.toString().getBytes();
+	}
+	public static byte[] trimNulls(byte[] arr) {
+
+		StringBuffer t_sb = new StringBuffer(arr.length);
+
+		for (int i = 0; i < arr.length; i++) {
+
+			if (arr[i] != '\0') {
 				t_sb.append((char) arr[i]);
 			}
 		}
@@ -107,18 +119,16 @@ public final class Utils {
 		return textPadding(df.format(doubleNum.doubleValue()).toString(), characterSet, fieldLength, ALIGN_RIGHT);
 	}
 
-	public static boolean contains(byte[] arr, byte value) {
+	public static boolean contains(byte[] bytes, byte value) {
 
-		boolean found = false;
-		for (int i = 0; i < arr.length; i++) {
+        for (byte b : bytes) {
 
-			if (arr[i] == value) {
+            if (b == value) {
 
-				found = true;
-				break;
-			}
-		}
+                return true;
+            }
+        }
 
-		return found;
+		return false;
 	}
 }
