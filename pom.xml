@@ -7,12 +7,19 @@
     <version>0.4.0-PHOREST-SNAPSHOT</version>
     <name>javadbf</name>
 
+    <distributionManagement>
+        <repository>
+            <id>apollo.phorest.com</id>
+            <url>scp://apollo.phorest.com/var/www/maven/repository</url>
+        </repository>
+    </distributionManagement>
+
     <build>
         <extensions>
             <extension>
                 <groupId>org.apache.maven.wagon</groupId>
                 <artifactId>wagon-ssh</artifactId>
-                <version>2.2</version>
+                <version>2.9</version>
             </extension>
         </extensions>
     </build>
@@ -22,17 +29,6 @@
             <groupId>joda-time</groupId>
             <artifactId>joda-time</artifactId>
             <version>2.0</version>
-        </dependency>
-
-        <dependency>
-            <groupId>junit</groupId>
-            <artifactId>junit</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.hamcrest</groupId>
-            <artifactId>hamcrest-core</artifactId>
-            <scope>test</scope>
         </dependency>
     </dependencies>
 </project>
